@@ -1,0 +1,12 @@
+http:
+  middlewares:
+    security-headers:
+      plugin:
+        standard_security_headers:
+          removeExposingHeaders: true
+  routers:
+    test:
+      rule: "PathPrefix(`/`)"
+      middlewares:
+        - security-headers
+      service: api@internal
