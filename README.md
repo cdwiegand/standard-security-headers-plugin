@@ -2,51 +2,20 @@
 
 This plugin will append some standard security headers based on the response mime-type.
 
-## Configuration
+## Configuration example:
 
-1. Enable the plugin in your Traefik configuration:
-
-```yaml
-experimental:
- plugins:
-  standard_security_headers:
-   moduleName: github.com/cdwiegand/standard-security-headers-plugin
-   version: v0.2.1
 ```
-
-1. Define the middleware. Note that this plugin does not need any configuration, however, values must be passed in for it to be accepted within Traefik:
-
-```yaml
 http:
- # ...
- middlewares:
-  # this name must match the middleware that you attach to routers later
-  security-headers:
-   plugin:
-    standard_security_headers:
-     removeExposingHeaders: true
+  middlewares:
+    standard-security-headers:
+      plugin:
+        standard-security-headers:
+          sanitizeExposingHeaders: "true"
+          defaultHeaders:
+            xframeOptions: "SAMEORIGIN"
+          forceHeaders:
+            contentTypeOptions: "nosniff"
 ```
-
-Please note that traefik requires at least one configuration variable set, to keep the defaults you can set `addCspHeader: true` to accomodate this. *This is not a requirement of this plugin, but a traefik requirement.*
-
-1. Then add it to your given routers, such as this:
-
-```yaml
-http:
- # ...
- routers:
-  example-router:
-   rule: host(`demo.localhost`)
-   service: service-foo
-   entryPoints:
-    - web
-   # add these 2 lines, use the same name you defined directly under "middlewares":
-   middlewares: 
-    - security-headers
-   # end add those 2 lines
-```
-
-1. You are done!
 
 ## Testing Methods
 

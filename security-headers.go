@@ -10,31 +10,46 @@ import (
 const (
 	Header_XFrameOptions                    = "X-Frame-Options"
 	Default_XFrameOptions                   = "SAMEORIGIN"
+  Force_XFrameOptions                     = ""
 	Header_ContentTypeOptions               = "X-Content-Type-Options"
 	Default_ContentTypeOptions              = "nosniff"
+	Force_ContentTypeOptions              = "nosniff"
 	Header_XssProtection                    = "X-XSS-Protection"
 	Default_XssProtection                   = "1; mode=block"
+	Force_XssProtection                   = "1; mode=block"
 	Header_ReferrerPolicy                   = "Referrer-Policy"
 	Default_ReferrerPolicy                  = "strict-origin-when-cross-origin"
+	Force_ReferrerPolicy                  = ""
 	Header_StrictTransportSecurity          = "Strict-Transport-Security"
 	Default_StrictTransportSecurity         = "max-age=63072000; includeSubDomains; preload"
+	Force_StrictTransportSecurity         = ""
 	Header_ContentSecurityPolicy            = "Content-Security-Policy"
 	Default_ContentSecurityPolicy           = ""
+	Force_ContentSecurityPolicy           = ""
 	Header_ContentSecurityPolicyReportOnly  = "Content-Security-Policy-Report-Only"
 	Default_ContentSecurityPolicyReportOnly = ""
+	Force_ContentSecurityPolicyReportOnly = ""
 	Header_CrossOriginOpenerPolicy          = "Cross-Origin-Opener-Policy"
 	Default_CrossOriginOpenerPolicy         = ""
+	Force_CrossOriginOpenerPolicy         = ""
 	Header_CrossOriginEmbedderPolicy        = "Cross-Origin-Embedder-Policy"
 	Default_CrossOriginEmbedderPolicy       = ""
+	Force_CrossOriginEmbedderPolicy       = ""
 	Header_CrossOriginResourcePolicy        = "Cross-Origin-Resource-Policy"
 	Default_CrossOriginResourcePolicy       = ""
+	Force_CrossOriginResourcePolicy       = ""
 	Header_PermissionsPolicy                = "Permissions-Policy"
 	Default_PermissionsPolicy               = ""
+	Force_PermissionsPolicy               = ""
 )
 
 // Config the plugin configuration.
 type Config struct {
 	SanitizeExposingHeaders         bool   `json:"sanitizeExposingHeaders"`
+  DefaultHeaders ConfigHeaders `json:"defaultHeaders"`
+  ForceHeaders ConfigHeaders `json:"forceHeaders"`
+}
+type ConfigHeaders struct {
 	XFrameOptions                   string `json:"xframeOptions"`
 	ContentTypeOptions              string `json:"contentTypeOptions"`
 	XssProtection                   string `json:"xssProtection"`
@@ -50,8 +65,7 @@ type Config struct {
 
 // CreateConfig creates the DEFAULT plugin configuration - no access to config yet!
 func CreateConfig() *Config {
-	return &Config{
-		SanitizeExposingHeaders:         true,
+  defaultHeaders := ConfigHeaders {
 		XFrameOptions:                   Default_XFrameOptions,
 		ContentTypeOptions:              Default_ContentTypeOptions,
 		XssProtection:                   Default_XssProtection,
@@ -63,6 +77,26 @@ func CreateConfig() *Config {
 		CrossOriginEmbedderPolicy:       Default_CrossOriginEmbedderPolicy,
 		CrossOriginResourcePolicy:       Default_CrossOriginResourcePolicy,
 		PermissionsPolicy:               Default_PermissionsPolicy,
+  }
+
+  forceHeaders := ConfigHeaders {
+		XFrameOptions:                   Force_XFrameOptions,
+		ContentTypeOptions:              Force_ContentTypeOptions,
+		XssProtection:                   Force_XssProtection,
+		ReferrerPolicy:                  Force_ReferrerPolicy,
+		StrictTransportSecurity:         Force_StrictTransportSecurity,
+		ContentSecurityPolicy:           Force_ContentSecurityPolicy,
+		ContentSecurityPolicyReportOnly: Force_ContentSecurityPolicyReportOnly,
+		CrossOriginOpenerPolicy:         Force_CrossOriginOpenerPolicy,
+		CrossOriginEmbedderPolicy:       Force_CrossOriginEmbedderPolicy,
+		CrossOriginResourcePolicy:       Force_CrossOriginResourcePolicy,
+		PermissionsPolicy:               Force_PermissionsPolicy,
+  }
+
+	return &Config{
+		SanitizeExposingHeaders:         true,
+    DefaultHeaders: defaultHeaders,
+    ForceHeaders: forceHeaders,
 	}
 }
 
@@ -102,8 +136,8 @@ func (t *StandardSecurityPlugin) ServeHTTP(rw http.ResponseWriter, req *http.Req
 
 	if contentTypeIsOrStartsWith(contentType, "text/html") {
 		// text/html only
-		handleHeader(headers, Header_XFrameOptions, t.Config.XFrameOptions)
-		handleHeader(headers, Header_XssProtection, t.Config.XssProtection)
+		handleHeader(headers, Header_XFrameOptions, t.Config.DefaultHeaders.XFrameOptions, t.Config.ForceHeaders.XFrameOptions)
+		handleHeader(headers, Header_XssProtection, t.Config.DefaultHeaders.XssProtection, t.Config.ForceHeaders.XssProtection)
 	} else {
 		headers.Del(Header_XFrameOptions)
 		headers.Del(Header_XssProtection)
@@ -115,20 +149,20 @@ func (t *StandardSecurityPlugin) ServeHTTP(rw http.ResponseWriter, req *http.Req
 		contentTypeIsOrStartsWith(contentType, "text/javascript") ||
 		contentTypeIsOrStartsWith(contentType, "application/pdf") ||
 		contentTypeIsOrStartsWith(contentType, "image/svg+xml") {
-		handleHeader(headers, Header_ContentSecurityPolicy, t.Config.ContentSecurityPolicy)
-		handleHeader(headers, Header_ContentSecurityPolicyReportOnly, t.Config.ContentSecurityPolicyReportOnly)
+		handleHeader(headers, Header_ContentSecurityPolicy, t.Config.DefaultHeaders.ContentSecurityPolicy, t.Config.ForceHeaders.ContentSecurityPolicy)
+		handleHeader(headers, Header_ContentSecurityPolicyReportOnly, t.Config.DefaultHeaders.ContentSecurityPolicyReportOnly, t.Config.ForceHeaders.ContentSecurityPolicyReportOnly)
 	} else {
 		headers.Del(Header_ContentSecurityPolicy)
 		headers.Del(Header_ContentSecurityPolicyReportOnly)
 	}
 
-	handleHeader(headers, Header_ContentTypeOptions, t.Config.ContentTypeOptions)
-	handleHeader(headers, Header_ReferrerPolicy, t.Config.ReferrerPolicy)
-	handleHeader(headers, Header_StrictTransportSecurity, t.Config.StrictTransportSecurity)
-	handleHeader(headers, Header_CrossOriginOpenerPolicy, t.Config.CrossOriginOpenerPolicy)
-	handleHeader(headers, Header_CrossOriginEmbedderPolicy, t.Config.CrossOriginEmbedderPolicy)
-	handleHeader(headers, Header_CrossOriginResourcePolicy, t.Config.CrossOriginResourcePolicy)
-	handleHeader(headers, Header_PermissionsPolicy, t.Config.PermissionsPolicy)
+  handleHeader(headers, Header_ContentTypeOptions, t.Config.DefaultHeaders.ContentTypeOptions, t.Config.ForceHeaders.ContentTypeOptions)
+  handleHeader(headers, Header_ReferrerPolicy, t.Config.DefaultHeaders.ReferrerPolicy, t.Config.ForceHeaders.ReferrerPolicy)
+  handleHeader(headers, Header_StrictTransportSecurity, t.Config.DefaultHeaders.StrictTransportSecurity, t.Config.ForceHeaders.StrictTransportSecurity)
+  handleHeader(headers, Header_CrossOriginOpenerPolicy, t.Config.DefaultHeaders.CrossOriginOpenerPolicy, t.Config.ForceHeaders.CrossOriginOpenerPolicy)
+  handleHeader(headers, Header_CrossOriginEmbedderPolicy, t.Config.DefaultHeaders.CrossOriginEmbedderPolicy, t.Config.ForceHeaders.CrossOriginEmbedderPolicy)
+  handleHeader(headers, Header_CrossOriginResourcePolicy, t.Config.DefaultHeaders.CrossOriginResourcePolicy, t.Config.ForceHeaders.CrossOriginResourcePolicy)
+  handleHeader(headers, Header_PermissionsPolicy, t.Config.DefaultHeaders.PermissionsPolicy, t.Config.ForceHeaders.PermissionsPolicy)
 
 	t.next.ServeHTTP(rw, req)
 }
@@ -137,13 +171,14 @@ func contentTypeIsOrStartsWith(haystack string, match string) bool {
 	return haystack == match || strings.HasPrefix(haystack, match+";")
 }
 
-func handleHeader(headers http.Header, headerName string, newValue string) {
-	if newValue == "" {
-		return
-	} else if newValue == "-" { // - means remove value
-		headers.Del(headerName)
-	} else {
-		headers.Set(headerName, newValue)
+func handleHeader(headers http.Header, headerName string, defaultValue string, forceValue string) {
+	if forceValue != "" {
+		headers[headerName] = []string{forceValue}
+    return
+  }
+
+  if defaultValue != "" && headers.Get(headerName) == "" {
+		headers[headerName]= []string{defaultValue}
 	}
 }
 

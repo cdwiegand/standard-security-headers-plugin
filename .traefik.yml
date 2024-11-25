@@ -4,4 +4,4 @@ import: github.com/cdwiegand/standard-security-headers-plugin
 basePkg: standard_security_headers
 summary: 'Adds standard security headers by default'
 testData:
-  addCspHeader: true
+  sanitizeExposingHeaders: true
