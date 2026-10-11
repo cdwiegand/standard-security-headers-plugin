@@ -1,54 +1,60 @@
 package standard_security_headers
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"net"
 	"net/http"
-	"strings"
 )
+
+// DisableValue removes the header: as a force value it always strips the header from the response,
+// as a default value it means no default is added (a value set by the backend still passes through).
+const DisableValue = "-"
 
 const (
 	Header_XFrameOptions                    = "X-Frame-Options"
 	Default_XFrameOptions                   = "SAMEORIGIN"
-  Force_XFrameOptions                     = ""
+	Force_XFrameOptions                     = ""
 	Header_ContentTypeOptions               = "X-Content-Type-Options"
 	Default_ContentTypeOptions              = "nosniff"
-	Force_ContentTypeOptions              = "nosniff"
+	Force_ContentTypeOptions                = "nosniff"
 	Header_XssProtection                    = "X-XSS-Protection"
-	Default_XssProtection                   = "1; mode=block"
-	Force_XssProtection                   = "1; mode=block"
+	Default_XssProtection                   = "1"
+	Force_XssProtection                     = "1"
 	Header_ReferrerPolicy                   = "Referrer-Policy"
 	Default_ReferrerPolicy                  = "strict-origin-when-cross-origin"
-	Force_ReferrerPolicy                  = ""
+	Force_ReferrerPolicy                    = ""
 	Header_StrictTransportSecurity          = "Strict-Transport-Security"
-	Default_StrictTransportSecurity         = "max-age=63072000; includeSubDomains; preload"
-	Force_StrictTransportSecurity         = ""
+	Default_StrictTransportSecurity         = "max-age=63072000; includeSubDomains"
+	Force_StrictTransportSecurity           = ""
 	Header_ContentSecurityPolicy            = "Content-Security-Policy"
 	Default_ContentSecurityPolicy           = ""
-	Force_ContentSecurityPolicy           = ""
+	Force_ContentSecurityPolicy             = ""
 	Header_ContentSecurityPolicyReportOnly  = "Content-Security-Policy-Report-Only"
 	Default_ContentSecurityPolicyReportOnly = ""
-	Force_ContentSecurityPolicyReportOnly = ""
+	Force_ContentSecurityPolicyReportOnly   = ""
 	Header_CrossOriginOpenerPolicy          = "Cross-Origin-Opener-Policy"
 	Default_CrossOriginOpenerPolicy         = ""
-	Force_CrossOriginOpenerPolicy         = ""
+	Force_CrossOriginOpenerPolicy           = ""
 	Header_CrossOriginEmbedderPolicy        = "Cross-Origin-Embedder-Policy"
 	Default_CrossOriginEmbedderPolicy       = ""
-	Force_CrossOriginEmbedderPolicy       = ""
+	Force_CrossOriginEmbedderPolicy         = ""
 	Header_CrossOriginResourcePolicy        = "Cross-Origin-Resource-Policy"
 	Default_CrossOriginResourcePolicy       = ""
-	Force_CrossOriginResourcePolicy       = ""
+	Force_CrossOriginResourcePolicy         = ""
 	Header_PermissionsPolicy                = "Permissions-Policy"
 	Default_PermissionsPolicy               = ""
-	Force_PermissionsPolicy               = ""
+	Force_PermissionsPolicy                 = ""
 )
 
 // Config the plugin configuration.
 type Config struct {
-	SanitizeExposingHeaders         bool   `json:"sanitizeExposingHeaders"`
-  DefaultHeaders ConfigHeaders `json:"defaultHeaders"`
-  ForceHeaders ConfigHeaders `json:"forceHeaders"`
+	SanitizeExposingHeaders bool          `json:"sanitizeExposingHeaders"`
+	DefaultHeaders          ConfigHeaders `json:"defaultHeaders"`
+	ForceHeaders            ConfigHeaders `json:"forceHeaders"`
 }
+
 type ConfigHeaders struct {
 	XFrameOptions                   string `json:"xframeOptions"`
 	ContentTypeOptions              string `json:"contentTypeOptions"`
@@ -65,7 +71,7 @@ type ConfigHeaders struct {
 
 // CreateConfig creates the DEFAULT plugin configuration - no access to config yet!
 func CreateConfig() *Config {
-  defaultHeaders := ConfigHeaders {
+	defaultHeaders := ConfigHeaders{
 		XFrameOptions:                   Default_XFrameOptions,
 		ContentTypeOptions:              Default_ContentTypeOptions,
 		XssProtection:                   Default_XssProtection,
@@ -77,9 +83,9 @@ func CreateConfig() *Config {
 		CrossOriginEmbedderPolicy:       Default_CrossOriginEmbedderPolicy,
 		CrossOriginResourcePolicy:       Default_CrossOriginResourcePolicy,
 		PermissionsPolicy:               Default_PermissionsPolicy,
-  }
+	}
 
-  forceHeaders := ConfigHeaders {
+	forceHeaders := ConfigHeaders{
 		XFrameOptions:                   Force_XFrameOptions,
 		ContentTypeOptions:              Force_ContentTypeOptions,
 		XssProtection:                   Force_XssProtection,
@@ -91,12 +97,12 @@ func CreateConfig() *Config {
 		CrossOriginEmbedderPolicy:       Force_CrossOriginEmbedderPolicy,
 		CrossOriginResourcePolicy:       Force_CrossOriginResourcePolicy,
 		PermissionsPolicy:               Force_PermissionsPolicy,
-  }
+	}
 
 	return &Config{
-		SanitizeExposingHeaders:         true,
-    DefaultHeaders: defaultHeaders,
-    ForceHeaders: forceHeaders,
+		SanitizeExposingHeaders: true,
+		DefaultHeaders:          defaultHeaders,
+		ForceHeaders:            forceHeaders,
 	}
 }
 
@@ -123,63 +129,91 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 }
 
 func (t *StandardSecurityPlugin) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
-	headers := rw.Header()
+	// headers can only be adjusted once the backend has set its own, so wait until they are written
+	t.next.ServeHTTP(&responseWriter{ResponseWriter: rw, plugin: t}, req)
+}
 
+func (t *StandardSecurityPlugin) applyHeaders(headers http.Header) {
 	if t.Config.SanitizeExposingHeaders {
-		badHeaders := badHeaders()
-		for i := 0; i < len(badHeaders); i++ {
-			headers.Del(badHeaders[i])
+		for _, header := range badHeaders() {
+			headers.Del(header)
 		}
 	}
 
-	contentType := headers.Get("Content-Type")
-
-	if contentTypeIsOrStartsWith(contentType, "text/html") {
-		// text/html only
-		handleHeader(headers, Header_XFrameOptions, t.Config.DefaultHeaders.XFrameOptions, t.Config.ForceHeaders.XFrameOptions)
-		handleHeader(headers, Header_XssProtection, t.Config.DefaultHeaders.XssProtection, t.Config.ForceHeaders.XssProtection)
-	} else {
-		headers.Del(Header_XFrameOptions)
-		headers.Del(Header_XssProtection)
-	}
-
-	if contentTypeIsOrStartsWith(contentType, "text/html") ||
-		contentTypeIsOrStartsWith(contentType, "text/xml") ||
-		contentTypeIsOrStartsWith(contentType, "application/xhtml+xml") ||
-		contentTypeIsOrStartsWith(contentType, "text/javascript") ||
-		contentTypeIsOrStartsWith(contentType, "application/pdf") ||
-		contentTypeIsOrStartsWith(contentType, "image/svg+xml") {
-		handleHeader(headers, Header_ContentSecurityPolicy, t.Config.DefaultHeaders.ContentSecurityPolicy, t.Config.ForceHeaders.ContentSecurityPolicy)
-		handleHeader(headers, Header_ContentSecurityPolicyReportOnly, t.Config.DefaultHeaders.ContentSecurityPolicyReportOnly, t.Config.ForceHeaders.ContentSecurityPolicyReportOnly)
-	} else {
-		headers.Del(Header_ContentSecurityPolicy)
-		headers.Del(Header_ContentSecurityPolicyReportOnly)
-	}
-
-  handleHeader(headers, Header_ContentTypeOptions, t.Config.DefaultHeaders.ContentTypeOptions, t.Config.ForceHeaders.ContentTypeOptions)
-  handleHeader(headers, Header_ReferrerPolicy, t.Config.DefaultHeaders.ReferrerPolicy, t.Config.ForceHeaders.ReferrerPolicy)
-  handleHeader(headers, Header_StrictTransportSecurity, t.Config.DefaultHeaders.StrictTransportSecurity, t.Config.ForceHeaders.StrictTransportSecurity)
-  handleHeader(headers, Header_CrossOriginOpenerPolicy, t.Config.DefaultHeaders.CrossOriginOpenerPolicy, t.Config.ForceHeaders.CrossOriginOpenerPolicy)
-  handleHeader(headers, Header_CrossOriginEmbedderPolicy, t.Config.DefaultHeaders.CrossOriginEmbedderPolicy, t.Config.ForceHeaders.CrossOriginEmbedderPolicy)
-  handleHeader(headers, Header_CrossOriginResourcePolicy, t.Config.DefaultHeaders.CrossOriginResourcePolicy, t.Config.ForceHeaders.CrossOriginResourcePolicy)
-  handleHeader(headers, Header_PermissionsPolicy, t.Config.DefaultHeaders.PermissionsPolicy, t.Config.ForceHeaders.PermissionsPolicy)
-
-	t.next.ServeHTTP(rw, req)
-}
-
-func contentTypeIsOrStartsWith(haystack string, match string) bool {
-	return haystack == match || strings.HasPrefix(haystack, match+";")
+	d := t.Config.DefaultHeaders
+	f := t.Config.ForceHeaders
+	handleHeader(headers, Header_XFrameOptions, d.XFrameOptions, f.XFrameOptions)
+	handleHeader(headers, Header_ContentTypeOptions, d.ContentTypeOptions, f.ContentTypeOptions)
+	handleHeader(headers, Header_XssProtection, d.XssProtection, f.XssProtection)
+	handleHeader(headers, Header_ReferrerPolicy, d.ReferrerPolicy, f.ReferrerPolicy)
+	handleHeader(headers, Header_StrictTransportSecurity, d.StrictTransportSecurity, f.StrictTransportSecurity)
+	handleHeader(headers, Header_ContentSecurityPolicy, d.ContentSecurityPolicy, f.ContentSecurityPolicy)
+	handleHeader(headers, Header_ContentSecurityPolicyReportOnly, d.ContentSecurityPolicyReportOnly, f.ContentSecurityPolicyReportOnly)
+	handleHeader(headers, Header_CrossOriginOpenerPolicy, d.CrossOriginOpenerPolicy, f.CrossOriginOpenerPolicy)
+	handleHeader(headers, Header_CrossOriginEmbedderPolicy, d.CrossOriginEmbedderPolicy, f.CrossOriginEmbedderPolicy)
+	handleHeader(headers, Header_CrossOriginResourcePolicy, d.CrossOriginResourcePolicy, f.CrossOriginResourcePolicy)
+	handleHeader(headers, Header_PermissionsPolicy, d.PermissionsPolicy, f.PermissionsPolicy)
 }
 
 func handleHeader(headers http.Header, headerName string, defaultValue string, forceValue string) {
-	if forceValue != "" {
-		headers[headerName] = []string{forceValue}
-    return
-  }
-
-  if defaultValue != "" && headers.Get(headerName) == "" {
-		headers[headerName]= []string{defaultValue}
+	if forceValue == DisableValue {
+		headers.Del(headerName)
+		return
 	}
+
+	if forceValue != "" {
+		headers.Set(headerName, forceValue)
+		return
+	}
+
+	if defaultValue != "" && defaultValue != DisableValue && headers.Get(headerName) == "" {
+		headers.Set(headerName, defaultValue)
+	}
+}
+
+// responseWriter applies the security headers just before the backend's response headers are sent.
+type responseWriter struct {
+	http.ResponseWriter
+	plugin      *StandardSecurityPlugin
+	wroteHeader bool
+}
+
+func (w *responseWriter) WriteHeader(code int) {
+	// 1xx informational responses (e.g. 103 Early Hints) are followed by the real response
+	if !w.wroteHeader && (code < 100 || code >= 200) {
+		w.wroteHeader = true
+		w.plugin.applyHeaders(w.ResponseWriter.Header())
+	}
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *responseWriter) Write(b []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *responseWriter) Flush() {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func (w *responseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hijacker, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("%T does not implement http.Hijacker", w.ResponseWriter)
+	}
+	return hijacker.Hijack()
+}
+
+// Unwrap lets http.ResponseController reach the underlying writer.
+func (w *responseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }
 
 func badHeaders() []string {

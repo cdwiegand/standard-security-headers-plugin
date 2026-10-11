@@ -3,7 +3,7 @@ http:
     security-headers:
       plugin:
         standard_security_headers:
-          removeExposingHeaders: true
+          sanitizeExposingHeaders: true
   routers:
     test:
       rule: "PathPrefix(`/`)"
